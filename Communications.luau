@@ -1,0 +1,91 @@
+--!nonstrict
+
+local comms = {}
+
+local DEFAULT_ENDPOINT = "http://localhost:8005"
+
+local function getRequestFunction()
+	if typeof(request) == "function" then
+		return request
+	end
+	if typeof(http_request) == "function" then
+		return http_request
+	end
+	if typeof(syn) == "table" and typeof(syn.request) == "function" then
+		return syn.request
+	end
+	return nil
+end
+
+local function normalizePayload(payload)
+	payload = payload or {}
+	local url = payload.Url or payload.URL or DEFAULT_ENDPOINT
+	return {
+		Url = url,
+		Method = payload.Method or "GET",
+		Headers = payload.Headers or {},
+		Body = payload.Body,
+	}
+end
+
+function comms.Request(payload)
+	local requestFunction = getRequestFunction()
+	if not requestFunction then
+		return nil, "request API unavailable"
+	end
+
+	local ok, response = pcall(function()
+		return requestFunction(normalizePayload(payload))
+	end)
+
+	if not ok then
+		return nil, tostring(response)
+	end
+
+	if not response then
+		return nil, "empty response"
+	end
+
+	local success = response.Success
+	if success == nil then
+		local statusCode = tonumber(response.StatusCode)
+		success = statusCode == nil or (statusCode >= 200 and statusCode < 300)
+	end
+
+	if not success then
+		return nil, tostring(response.StatusMessage or response.StatusCode or "request failed")
+	end
+
+	return response.Body, nil, response
+end
+
+function comms.Log(level, who, message)
+	level = math.floor(tonumber(level) or 0)
+	who = tostring(who or "UNKNOWN")
+	message = tostring(message or "")
+
+	local levelText = ""
+	if level == 1 then
+		levelText = "WARN"
+	elseif level >= 2 then
+		levelText = "ERROR"
+	end
+
+	local formatted
+	if levelText == "" then
+		formatted = "[" .. who .. "] " .. message
+	else
+		formatted = "[" .. levelText .. "][" .. who .. "] " .. message
+	end
+
+	return comms.Request({
+		Url = DEFAULT_ENDPOINT,
+		Method = "POST",
+		Headers = {
+			["Content-Type"] = "text/plain",
+		},
+		Body = formatted,
+	})
+end
+
+return comms
