@@ -1,5 +1,8 @@
 --!nonstrict
 
+-- Voltrex Communications
+-- Local HTTP/logging only. No UI code belongs in this module.
+
 local comms = {}
 
 local DEFAULT_ENDPOINT = "http://localhost:8005"
