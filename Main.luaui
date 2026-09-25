@@ -13,8 +13,17 @@ local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
 local MarketplaceService = game:GetService("MarketplaceService")
 
-local Interface = require(script.Parent.Interface)
-local Communications = require(script.Parent.Communications)
+local BootstrapENV = (typeof(getgenv) == "function" and getgenv()) or _G
+local Interface = BootstrapENV.__VOLTREX_INTERFACE
+local Communications = BootstrapENV.__VOLTREX_COMMUNICATIONS
+
+if type(Interface) ~= "table" then
+	error("Voltrex bootstrap did not provide interface.luaui")
+end
+
+if type(Communications) ~= "table" then
+	error("Voltrex bootstrap did not provide Communications.luaui")
+end
 
 local AvatarEditorService = nil
 pcall(function()
@@ -144,7 +153,7 @@ for _, key in ipairs({
 	"TextPrimary", "TextSecondary", "TextMuted", "Accent", "AccentSoft",
 	"Selected", "Success", "Warning", "Error", "IconBtn", "Overlay",
 	"Scrollbar", "White"
-	}) do
+}) do
 	Config[key] = Theme[key]
 end
 
@@ -2217,7 +2226,7 @@ function module.Start()
 		Interface.Startup(
 			Theme,
 			"Voltrex",
-			"Ultimate hacks",
+			"Ultimate",
 			gamename,
 			"V0.04",
 			"cwcodemaker",
