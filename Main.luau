@@ -1,0 +1,2306 @@
+--!nonstrict
+
+-- Voltrex Main
+-- Runtime/controller logic only. UI creation lives in Interface.lua.
+
+local module = {}
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+local Interface = require(script.Parent.Interface)
+local Communications = require(script.Parent.Communications)
+
+local AvatarEditorService = nil
+pcall(function()
+	AvatarEditorService = game:GetService("AvatarEditorService")
+end)
+
+local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+	task.wait()
+	LocalPlayer = Players.LocalPlayer
+end
+
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local Theme = {
+	-- Startup / message box
+	OriginalBackground = Color3.fromRGB(55, 63, 76),
+	Background = Color3.fromRGB(39, 45, 55),
+	LeftPanel = Color3.fromRGB(23, 27, 33),
+	Text = Color3.fromRGB(235, 238, 243),
+	SecondaryText = Color3.fromRGB(170, 177, 188),
+	Accent = Color3.fromRGB(107, 151, 255),
+	LoadingBarBackground = Color3.fromRGB(50, 58, 69),
+
+	-- Main client UI
+	BackgroundPrimary = Color3.fromRGB(16, 16, 16),
+	BackgroundSecondary = Color3.fromRGB(24, 24, 24),
+	BackgroundTertiary = Color3.fromRGB(29, 30, 35),
+	Surface = Color3.fromRGB(32, 33, 39),
+	SurfaceHover = Color3.fromRGB(39, 41, 48),
+	SurfacePressed = Color3.fromRGB(45, 48, 57),
+	Border = Color3.fromRGB(48, 48, 48),
+	BorderSoft = Color3.fromRGB(37, 38, 43),
+	TextColor = Color3.fromRGB(143, 180, 255),
+	TextPrimary = Color3.fromRGB(236, 239, 246),
+	TextSecondary = Color3.fromRGB(125, 145, 182),
+	TextMuted = Color3.fromRGB(93, 96, 108),
+	AccentSoft = Color3.fromRGB(53, 75, 126),
+	Selected = Color3.fromRGB(42, 56, 85),
+	Success = Color3.fromRGB(86, 190, 123),
+	Warning = Color3.fromRGB(220, 169, 75),
+	Error = Color3.fromRGB(211, 88, 103),
+	IconBtn = Color3.fromRGB(19, 19, 22),
+	Overlay = Color3.fromRGB(7, 8, 11),
+	Scrollbar = Color3.fromRGB(75, 79, 92),
+	White = Color3.fromRGB(255, 255, 255),
+}
+
+local Config = {
+	Username = "", -- leave blank to allow any local player
+
+	PermitFlight = true,
+	CollectiveSpeed = 50,
+	MaxSpeed = 1000,
+	FlightBoostMultiplier = 2.5,
+	FlightDeceleration = 10,
+	FlightActive = false,
+
+	PermitFling = true,
+	FlingActive = false,
+	FlingTime = 3.5,
+	FlingPower = 250000,
+
+	PermitAvatarEditor = true,
+	PermitAvatarRequest = false,
+	PermitNoclip = true,
+	PermitConsole = false,
+	PermitSpawnpoints = true,
+	PermitCursorLock = true,
+	PermitAimbot = true,
+	PermitWallVision = true,
+	PermitTeleport = true,
+
+	RequireAuth = false,
+	AllowHTTPS = false,
+
+	UIopen = false,
+	SpawnpointsVisible = true,
+	NameTagsVisible = false,
+	PlayerHighlightsVisible = false,
+	TracersVisible = false,
+	Fullbright = false,
+	Spectating = false,
+	Following = false,
+	Frozen = false,
+	WallVision = false,
+	Noclip = false,
+	Invisible = false,
+
+	WallTransparency = 0.7,
+	WallRadius = 10,
+	WallRayDistance = 2000,
+	WallUpdateInterval = 1 / 30,
+	WallMaxNormalY = 0.45,
+	TeleportRadius = 50,
+	LookDistance = 300,
+	LookAngle = 12,
+	AutoLockFOV = 250,
+	AimbotSmoothness = 5,
+	AimbotAimPart = "Head",
+	AimbotRequireRightMouse = false,
+	UsernameDistance = 1500,
+	TransparencyStep = 0.01,
+	FollowOffset = Vector3.new(0, 1.5, 4),
+
+	ToggleFlight = Enum.KeyCode.T,
+	MoveForward = Enum.KeyCode.W,
+	MoveBackwards = Enum.KeyCode.S,
+	MoveLeft = Enum.KeyCode.A,
+	MoveRight = Enum.KeyCode.D,
+	FlightSprint = Enum.KeyCode.LeftShift,
+	ToggleAimbot = Enum.KeyCode.Y,
+	ToggleCursorLock = Enum.KeyCode.L,
+	ToggleAvatar = Enum.KeyCode.U,
+	TransparencyUp = Enum.KeyCode.N,
+	TransparencyDown = Enum.KeyCode.M,
+	ViewSpawnpoints = Enum.KeyCode.G,
+	TogglePanel = Enum.KeyCode.RightControl,
+
+	Icon = "rbxassetid://107844260625621",
+}
+
+-- A few world-visual functions use the same colors as the UI.
+for _, key in ipairs({
+	"BackgroundPrimary", "BackgroundSecondary", "BackgroundTertiary", "Surface",
+	"SurfaceHover", "SurfacePressed", "Border", "BorderSoft", "TextColor",
+	"TextPrimary", "TextSecondary", "TextMuted", "Accent", "AccentSoft",
+	"Selected", "Success", "Warning", "Error", "IconBtn", "Overlay",
+	"Scrollbar", "White"
+	}) do
+	Config[key] = Theme[key]
+end
+
+local ENV = _G
+pcall(function()
+	if typeof(getgenv) == "function" then
+		ENV = getgenv()
+	end
+end)
+
+local Connections = {}
+local function Connect(signal, callback)
+	local connection = signal:Connect(callback)
+	table.insert(Connections, connection)
+	return connection
+end
+
+local function New(className, properties, parent)
+	local object = Instance.new(className)
+	for property, value in pairs(properties or {}) do
+		object[property] = value
+	end
+	if parent then
+		object.Parent = parent
+	end
+	return object
+end
+
+local UI = nil
+local started = false
+
+local Character = nil
+local Humanoid = nil
+local RootPart = nil
+local SelectedPlayer = nil
+
+local flightActive = false
+local flightVelocity = Vector3.zero
+local noclipEnabled = false
+local noclipBackup = {}
+local flingActive = false
+local flingCollisionBackup = {}
+local cursorLockActive = false
+local cursorLockTarget = nil
+local warnedCursorAPI = false
+local aimbotActive = false
+local aimbotAiming = false
+local wallModeEnabled = false
+local activeTransparentWalls = {}
+local wallUpdateAccumulator = 0
+local selfTransparency = 0
+local invisible = false
+local beforeInvisible = 0
+local nHeld = false
+local mHeld = false
+local transparencyHoldTimer = 0
+local transparencyRefreshTimer = 0
+local spectating = false
+local followActive = false
+local frozen = false
+local fullbrightEnabled = false
+local fullbrightBackup = nil
+local nameTagsEnabled = false
+local playerHighlightsEnabled = false
+local tracersEnabled = false
+local selectedHighlightEnabled = false
+local selectedHighlight = nil
+local spawnpointsVisible = Config.SpawnpointsVisible
+local SpawnCache = {}
+local playerConnections = {}
+local PlayerList = {}
+local PlayerIndex = 0
+local originalZoom = {
+	Min = LocalPlayer.CameraMinZoomDistance,
+	Max = LocalPlayer.CameraMaxZoomDistance,
+}
+local zoomUnlocked = false
+local originalCameraFOV = 70
+pcall(function()
+	if Workspace.CurrentCamera then
+		originalCameraFOV = Workspace.CurrentCamera.FieldOfView
+	end
+end)
+
+local AvatarPreviewDescription = nil
+local AvatarPreviewModel = nil
+local outfitLoading = false
+local outfitsLoaded = false
+local avatarMenuOpen = false
+
+local function SetStatus(text, mode)
+	text = tostring(text)
+	if UI and UI.SetStatus then
+		UI:SetStatus(text, mode)
+	end
+	local level = 0
+	if mode == "warn" then level = 1 end
+	if mode == "bad" then level = 2 end
+	task.spawn(function()
+		Communications.Log(level, "CLIENT", text)
+	end)
+end
+
+local function SetActionState(key, active, description)
+	if UI and UI.SetActionState then
+		UI:SetActionState(key, active, description)
+	end
+end
+
+local function GetRoot(player)
+	local character = player and player.Character
+	return character and character:FindFirstChild("HumanoidRootPart") or nil
+end
+
+local function GetHumanoid(player)
+	local character = player and player.Character
+	return character and character:FindFirstChildOfClass("Humanoid") or nil
+end
+
+local function BuildPlayerList()
+	table.clear(PlayerList)
+	for _, player in ipairs(Players:GetPlayers()) do
+		table.insert(PlayerList, player)
+	end
+	table.sort(PlayerList, function(a, b)
+		if a == LocalPlayer then return true end
+		if b == LocalPlayer then return false end
+		return string.lower(a.DisplayName) < string.lower(b.DisplayName)
+	end)
+	if #PlayerList == 0 then
+		PlayerIndex = 0
+	elseif PlayerIndex < 1 then
+		PlayerIndex = 1
+	elseif PlayerIndex > #PlayerList then
+		PlayerIndex = #PlayerList
+	end
+end
+
+local function RefreshSelectedUI()
+	if UI and UI.SetSelectedPlayer then
+		UI:SetSelectedPlayer(SelectedPlayer)
+	end
+end
+
+local function RebuildPlayerCards()
+	BuildPlayerList()
+	if UI and UI.RefreshPlayers then
+		UI:RefreshPlayers(SelectedPlayer)
+	end
+end
+
+local function ClearSelectedHighlight()
+	if selectedHighlight then
+		pcall(function() selectedHighlight:Destroy() end)
+		selectedHighlight = nil
+	end
+end
+
+local function RefreshSelectedHighlight()
+	ClearSelectedHighlight()
+	if not selectedHighlightEnabled or not SelectedPlayer or not SelectedPlayer.Character then
+		return
+	end
+	local h = New("Highlight", {
+		Name = "VoltrexSelectedHighlight",
+		DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+		FillColor = Config.Accent,
+		FillTransparency = 0.84,
+		OutlineColor = Config.White,
+		OutlineTransparency = 0.05,
+		Adornee = SelectedPlayer.Character,
+	}, SelectedPlayer.Character)
+	selectedHighlight = h
+end
+
+local function SetSelectedPlayer(player)
+	if not player or player.Parent ~= Players then
+		SelectedPlayer = nil
+		if aimbotActive then
+			aimbotActive = false
+			Config.AimbotActive = false
+			SetActionState("Aimbot", false, "Aim camera at selected player")
+		end
+		RefreshSelectedUI()
+		RefreshSelectedHighlight()
+		return
+	end
+	SelectedPlayer = player
+	for index, other in ipairs(PlayerList) do
+		if other == player then
+			PlayerIndex = index
+			break
+		end
+	end
+	RefreshSelectedUI()
+	RefreshSelectedHighlight()
+	if aimbotActive and player ~= LocalPlayer then
+		SetActionState(
+			"Aimbot",
+			true,
+			(Config.AimbotRequireRightMouse and "Hold RMB - target @" or "Tracking @") .. player.Name
+		)
+	end
+	SetStatus("Selected @" .. player.Name, "good")
+end
+
+
+local function ShowPlayer(index)
+	BuildPlayerList()
+	if #PlayerList == 0 then
+		SetSelectedPlayer(nil)
+		return
+	end
+	if index < 1 then
+		index = #PlayerList
+	elseif index > #PlayerList then
+		index = 1
+	end
+	PlayerIndex = index
+	SetSelectedPlayer(PlayerList[index])
+end
+
+
+
+-- Spawnpoint marker ----------------------------------------------------------
+
+local function DrawSpawnpoint(player, spawn)
+	if not Config.PermitSpawnpoints or not player or not spawn then
+		return
+	end
+	if UI and UI.DrawSpawnpoint then
+		return UI:DrawSpawnpoint(player, spawn, spawnpointsVisible, 10000)
+	end
+end
+
+local function FindNearestSpawn(character)
+	if not character then
+		return nil
+	end
+	local root = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 5)
+	if not root then
+		return nil
+	end
+	local closest = nil
+	local closestDistance = math.huge
+	for _, object in ipairs(Workspace:GetDescendants()) do
+		if object:IsA("SpawnLocation") and object.Enabled then
+			local distance = (object.Position - root.Position).Magnitude
+			if distance < closestDistance then
+				closestDistance = distance
+				closest = object
+			end
+		end
+	end
+	return closest
+end
+
+local function CaptureSpawnpoint(player, character)
+	if not Config.PermitSpawnpoints or not player then
+		return
+	end
+	local spawn = player.RespawnLocation
+	if not (spawn and spawn:IsA("SpawnLocation")) then
+		spawn = FindNearestSpawn(character)
+	end
+	if spawn then
+		SpawnCache[player] = spawn
+		DrawSpawnpoint(player, spawn)
+	end
+end
+
+local function ToggleSpawnpoints()
+	if not Config.PermitSpawnpoints then
+		SetStatus("Spawnpoints disabled by Config", "bad")
+		return
+	end
+	spawnpointsVisible = not spawnpointsVisible
+	Config.SpawnpointsVisible = spawnpointsVisible
+	if UI and UI.SetSpawnpointsVisible then
+		UI:SetSpawnpointsVisible(spawnpointsVisible)
+	end
+	SetActionState("Spawnpoints", spawnpointsVisible, spawnpointsVisible and "Spawn markers visible" or "Spawn markers hidden")
+	SetStatus("Spawnpoints " .. (spawnpointsVisible and "ON" or "OFF"), "good")
+end
+
+local function RefreshSpawnpoints()
+	for _, player in ipairs(Players:GetPlayers()) do
+		local spawn = player.RespawnLocation or SpawnCache[player]
+		if spawn then
+			DrawSpawnpoint(player, spawn)
+		elseif player.Character then
+			task.spawn(CaptureSpawnpoint, player, player.Character)
+		end
+	end
+	SetStatus("Spawnpoints refreshed", "good")
+end
+
+
+-- Character transparency ----------------------------------------------------
+
+local function ApplyCharacterTransparency()
+	local character = LocalPlayer.Character
+	if not character then
+		return
+	end
+	for _, object in ipairs(character:GetDescendants()) do
+		if object:IsA("BasePart") then
+			object.LocalTransparencyModifier = selfTransparency
+		end
+	end
+end
+
+local function UpdateTransparencyUI()
+	local text = "Transparency: " .. string.format("%.2f", selfTransparency)
+	if UI and UI.MainTransparencyLabel then UI.MainTransparencyLabel.Text = text end
+	if UI and UI.AvatarTransparencyLabel then UI.AvatarTransparencyLabel.Text = text end
+	SetActionState("Invisible", invisible, invisible and "Local character hidden" or "Local character visible")
+	SetActionState("AvatarInvisible", invisible, invisible and "Local character hidden" or "Local character visible")
+end
+
+local function SetCharacterTransparency(value)
+	selfTransparency = math.clamp(tonumber(value) or 0, 0, 1)
+	Config.Invisible = invisible
+	ApplyCharacterTransparency()
+	UpdateTransparencyUI()
+end
+
+local function IncreaseTransparency()
+	if invisible then
+		invisible = false
+		selfTransparency = beforeInvisible
+	end
+	SetCharacterTransparency(selfTransparency + Config.TransparencyStep)
+	beforeInvisible = selfTransparency
+end
+
+local function DecreaseTransparency()
+	if invisible then
+		invisible = false
+		selfTransparency = beforeInvisible
+	end
+	SetCharacterTransparency(selfTransparency - Config.TransparencyStep)
+	beforeInvisible = selfTransparency
+end
+
+local function ToggleInvisible()
+	if invisible then
+		invisible = false
+		SetCharacterTransparency(beforeInvisible)
+		SetStatus("Invisible OFF", "good")
+	else
+		beforeInvisible = selfTransparency
+		invisible = true
+		SetCharacterTransparency(1)
+		SetStatus("Invisible ON", "good")
+	end
+	Config.Invisible = invisible
+end
+
+-- Noclip --------------------------------------------------------------------
+
+local function RestoreNoclip()
+	for part, original in pairs(noclipBackup) do
+		if part and part.Parent then
+			part.CanCollide = original
+		end
+	end
+	table.clear(noclipBackup)
+end
+
+local function ApplyNoclip()
+	if not noclipEnabled or not Character then
+		return
+	end
+	for _, object in ipairs(Character:GetDescendants()) do
+		if object:IsA("BasePart") then
+			if noclipBackup[object] == nil then
+				noclipBackup[object] = object.CanCollide
+			end
+			object.CanCollide = false
+		end
+	end
+end
+
+local function ToggleNoclip()
+	if not Config.PermitNoclip then
+		SetStatus("Noclip disabled by Config", "bad")
+		return
+	end
+	noclipEnabled = not noclipEnabled
+	Config.Noclip = noclipEnabled
+	if noclipEnabled then
+		ApplyNoclip()
+		SetStatus("Noclip enabled", "good")
+	else
+		RestoreNoclip()
+		SetStatus("Noclip disabled", "good")
+	end
+	SetActionState("Noclip", noclipEnabled, noclipEnabled and "Collision disabled" or "Character collision enabled")
+end
+
+-- Flight --------------------------------------------------------------------
+
+local function StopFlight()
+	if not flightActive then
+		return
+	end
+	flightActive = false
+	Config.FlightActive = false
+	flightVelocity = Vector3.zero
+	if RootPart and RootPart.Parent then
+		RootPart.Anchored = false
+		RootPart.AssemblyLinearVelocity = Vector3.zero
+		RootPart.AssemblyAngularVelocity = Vector3.zero
+	end
+	if Humanoid and Humanoid.Parent then
+		Humanoid.PlatformStand = false
+		Humanoid.AutoRotate = true
+		pcall(function()
+			Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end)
+		task.defer(function()
+			if Humanoid and Humanoid.Parent and Humanoid.Health > 0 then
+				pcall(function()
+					Humanoid:ChangeState(Enum.HumanoidStateType.Running)
+				end)
+			end
+		end)
+	end
+	SetActionState("Flight", false, "T to enable flight")
+	SetStatus("Flight disabled", "good")
+end
+
+local function StartFlight()
+	if not Config.PermitFlight then
+		SetStatus("Flight disabled by Config", "bad")
+		return
+	end
+	if flightActive or flingActive then
+		return
+	end
+	Character = LocalPlayer.Character
+	Humanoid = GetHumanoid(LocalPlayer)
+	RootPart = GetRoot(LocalPlayer)
+	if not Character or not Humanoid or not RootPart then
+		SetStatus("Character is not ready", "bad")
+		return
+	end
+	flightActive = true
+	Config.FlightActive = true
+	flightVelocity = Vector3.zero
+	Humanoid.AutoRotate = false
+	Humanoid.PlatformStand = false
+	RootPart.Anchored = false
+	SetActionState("Flight", true, "WASD camera flight - Shift boost")
+	SetStatus("Flight enabled", "good")
+end
+
+local function ToggleFlight()
+	if flightActive then
+		StopFlight()
+	else
+		StartFlight()
+	end
+end
+
+local fly = ToggleFlight
+
+-- Health --------------------------------------------------------------------
+
+local function SetHealth(value)
+	local humanoid = GetHumanoid(LocalPlayer)
+	value = tonumber(value)
+	if not humanoid then
+		SetStatus("Humanoid is not ready", "bad")
+		return
+	end
+	if not value then
+		SetStatus("Invalid health value", "bad")
+		return
+	end
+	value = math.clamp(value, 0, humanoid.MaxHealth)
+	pcall(function()
+		humanoid.Health = value
+	end)
+	if UI and UI.HealthInput then
+		UI.HealthInput.Text = tostring(value)
+	end
+	SetStatus("Health = " .. tostring(value), "good")
+end
+
+local function FullHeal()
+	local humanoid = GetHumanoid(LocalPlayer)
+	if not humanoid then
+		SetStatus("Humanoid is not ready", "bad")
+		return
+	end
+	pcall(function()
+		humanoid.Health = humanoid.MaxHealth
+	end)
+	if UI and UI.HealthInput then
+		UI.HealthInput.Text = tostring(humanoid.MaxHealth)
+	end
+	SetStatus("Fully healed", "good")
+end
+
+-- Safe teleport -------------------------------------------------------------
+
+local LOOK_DOT = math.cos(math.rad(Config.LookAngle))
+
+local function IsFacingTarget(watcher, target)
+	local watcherCharacter = watcher.Character
+	local targetCharacter = target.Character
+	if not watcherCharacter or not targetCharacter then
+		return false
+	end
+	local watcherPart = watcherCharacter:FindFirstChild("Head") or watcherCharacter:FindFirstChild("HumanoidRootPart")
+	local targetPart = targetCharacter:FindFirstChild("Head") or targetCharacter:FindFirstChild("HumanoidRootPart")
+	if not watcherPart or not targetPart then
+		return false
+	end
+	local difference = targetPart.Position - watcherPart.Position
+	local distance = difference.Magnitude
+	if distance <= 0 or distance > Config.LookDistance then
+		return false
+	end
+	if watcherPart.CFrame.LookVector:Dot(difference.Unit) < LOOK_DOT then
+		return false
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {watcherCharacter}
+	params.IgnoreWater = true
+	local result = Workspace:Raycast(watcherPart.Position, difference, params)
+	if not result then
+		return true
+	end
+	return result.Instance:IsDescendantOf(targetCharacter)
+end
+
+local function CheckTeleportSafety(target)
+	if not target or target == LocalPlayer then
+		return false, "Select another player"
+	end
+	local targetRoot = GetRoot(target)
+	if not targetRoot then
+		return false, "Target is not loaded"
+	end
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player ~= target then
+			local root = GetRoot(player)
+			if root then
+				local distance = (root.Position - targetRoot.Position).Magnitude
+				if distance <= Config.TeleportRadius then
+					return false, "@" .. player.Name .. " is " .. math.floor(distance) .. " studs from target"
+				end
+			end
+		end
+	end
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player ~= target and IsFacingTarget(player, target) then
+			return false, "@" .. player.Name .. " is looking at target"
+		end
+	end
+	return true, "Safe"
+end
+
+local function TeleportSelected()
+	if not Config.PermitTeleport then
+		SetStatus("Teleport disabled by Config", "bad")
+		return
+	end
+	if not SelectedPlayer then
+		SetStatus("Select a player", "bad")
+		return
+	end
+	local safe, reason = CheckTeleportSafety(SelectedPlayer)
+	if not safe then
+		SetStatus(reason, "bad")
+		return
+	end
+	local targetRoot = GetRoot(SelectedPlayer)
+	RootPart = GetRoot(LocalPlayer)
+	if not RootPart or not targetRoot then
+		SetStatus("Character is not ready", "bad")
+		return
+	end
+	RootPart.CFrame = targetRoot.CFrame * CFrame.new(0, 2, 4)
+	RootPart.AssemblyLinearVelocity = Vector3.zero
+	RootPart.AssemblyAngularVelocity = Vector3.zero
+	SetStatus("Teleported to @" .. SelectedPlayer.Name, "good")
+end
+
+local function TeleportToSelectedSpawn()
+	if not SelectedPlayer then
+		SetStatus("Select a player", "bad")
+		return
+	end
+	local spawn = SelectedPlayer.RespawnLocation or SpawnCache[SelectedPlayer]
+	RootPart = GetRoot(LocalPlayer)
+	if not spawn then
+		SetStatus("Spawnpoint is unknown for @" .. SelectedPlayer.Name, "bad")
+		return
+	end
+	if not RootPart then
+		return
+	end
+	RootPart.CFrame = spawn.CFrame * CFrame.new(0, 5, 0)
+	RootPart.AssemblyLinearVelocity = Vector3.zero
+	SetStatus("Teleported to " .. SelectedPlayer.DisplayName .. " spawn", "good")
+end
+
+-- Fling ---------------------------------------------------------------------
+
+local function EnableFlingCollision()
+	table.clear(flingCollisionBackup)
+	for _, player in ipairs(Players:GetPlayers()) do
+		local character = player.Character
+		if character then
+			for _, object in ipairs(character:GetDescendants()) do
+				if object:IsA("BasePart") then
+					flingCollisionBackup[object] = object.CanCollide
+					object.CanCollide = true
+				end
+			end
+		end
+	end
+end
+
+local function EnforceFlingCollision()
+	for _, player in ipairs(Players:GetPlayers()) do
+		local character = player.Character
+		if character then
+			for _, object in ipairs(character:GetDescendants()) do
+				if object:IsA("BasePart") then
+					if flingCollisionBackup[object] == nil then
+						flingCollisionBackup[object] = object.CanCollide
+					end
+					object.CanCollide = true
+				end
+			end
+		end
+	end
+end
+
+local function RestoreFlingCollision()
+	for object, original in pairs(flingCollisionBackup) do
+		if object and object.Parent then
+			object.CanCollide = original
+		end
+	end
+	table.clear(flingCollisionBackup)
+end
+
+local function FlingSelected()
+	if not Config.PermitFling then
+		SetStatus("Fling disabled by Config", "bad")
+		return
+	end
+	if flingActive then
+		flingActive = false
+		Config.FlingActive = false
+		SetStatus("Stopping fling...", "warn")
+		return
+	end
+	local target = SelectedPlayer
+	if not target or target == LocalPlayer then
+		SetStatus("Select another player", "bad")
+		return
+	end
+	local ourRoot = GetRoot(LocalPlayer)
+	local targetRoot = GetRoot(target)
+	local ourHumanoid = GetHumanoid(LocalPlayer)
+	local targetHumanoid = GetHumanoid(target)
+	if not ourRoot or not targetRoot or not ourHumanoid or not targetHumanoid then
+		SetStatus("Characters are not ready", "bad")
+		return
+	end
+	if flightActive then
+		StopFlight()
+	end
+	local noclipWasEnabled = noclipEnabled
+	if noclipWasEnabled then
+		RestoreNoclip()
+	end
+	flingActive = true
+	Config.FlingActive = true
+	SetActionState("Fling", true, "Click again to stop")
+	SetStatus("Flinging @" .. target.Name, "warn")
+	local originalCFrame = ourRoot.CFrame
+	local oldAutoRotate = ourHumanoid.AutoRotate
+	local oldPlatformStand = ourHumanoid.PlatformStand
+	ourHumanoid.AutoRotate = false
+	ourHumanoid.PlatformStand = false
+	ourRoot.Anchored = false
+	EnableFlingCollision()
+	local angular = New("BodyAngularVelocity", {
+		Name = "VoltrexFling",
+		AngularVelocity = Vector3.new(Config.FlingPower, Config.FlingPower, Config.FlingPower),
+		MaxTorque = Vector3.new(math.huge, math.huge, math.huge),
+		P = math.huge
+	}, ourRoot)
+	local offsets = {
+		Vector3.new(0.75, 0, 0), Vector3.new(-0.75, 0, 0),
+		Vector3.new(0, 0.75, 0), Vector3.new(0, -0.75, 0),
+		Vector3.new(0, 0, 0.75), Vector3.new(0, 0, -0.75),
+		Vector3.new(0.45, 0.45, 0), Vector3.new(-0.45, 0.45, 0)
+	}
+	local started = os.clock()
+	local step = 0
+	while flingActive
+		and target.Parent == Players
+		and targetRoot.Parent
+		and targetHumanoid.Health > 0
+		and ourRoot.Parent
+		and os.clock() - started < Config.FlingTime
+	do
+		step += 1
+		EnforceFlingCollision()
+		local offset = offsets[((step - 1) % #offsets) + 1]
+		ourRoot.CFrame = targetRoot.CFrame
+			* CFrame.new(offset)
+			* CFrame.Angles(math.rad(step * 100), math.rad(step * 135), math.rad(step * 170))
+		ourRoot.AssemblyAngularVelocity = Vector3.new(Config.FlingPower, Config.FlingPower, Config.FlingPower)
+		ourRoot.AssemblyLinearVelocity = Vector3.new(Config.FlingPower, Config.FlingPower, Config.FlingPower)
+		RunService.Heartbeat:Wait()
+		if targetRoot.Parent and ourRoot.Parent then
+			ourRoot.CFrame = targetRoot.CFrame
+			ourRoot.AssemblyAngularVelocity = Vector3.new(-Config.FlingPower, Config.FlingPower, -Config.FlingPower)
+			RunService.Heartbeat:Wait()
+		end
+	end
+	flingActive = false
+	Config.FlingActive = false
+	pcall(function()
+		angular:Destroy()
+	end)
+	if ourRoot and ourRoot.Parent then
+		ourRoot.AssemblyLinearVelocity = Vector3.zero
+		ourRoot.AssemblyAngularVelocity = Vector3.zero
+		ourRoot.CFrame = originalCFrame
+		RunService.Heartbeat:Wait()
+		ourRoot.AssemblyLinearVelocity = Vector3.zero
+		ourRoot.AssemblyAngularVelocity = Vector3.zero
+	end
+	RestoreFlingCollision()
+	if ourHumanoid and ourHumanoid.Parent then
+		ourHumanoid.AutoRotate = oldAutoRotate
+		ourHumanoid.PlatformStand = oldPlatformStand
+		pcall(function()
+			ourHumanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end)
+	end
+	if noclipWasEnabled then
+		ApplyNoclip()
+	end
+	SetActionState("Fling", false, "Fling selected player")
+	SetStatus("Fling finished", "good")
+end
+
+-- Selected-player aimbot ----------------------------------------------------
+
+local function GetAimbotPart(player)
+	if not player or player == LocalPlayer or player.Parent ~= Players or not player.Character then
+		return nil
+	end
+	local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return nil
+	end
+	if Config.AimbotAimPart == "HumanoidRootPart" then
+		return player.Character:FindFirstChild("HumanoidRootPart") or player.Character:FindFirstChild("Head")
+	end
+	return player.Character:FindFirstChild("Head") or player.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function UpdateAimbot()
+	if not aimbotActive then
+		return
+	end
+	if Config.AimbotRequireRightMouse and not aimbotAiming then
+		return
+	end
+	if not SelectedPlayer or SelectedPlayer == LocalPlayer then
+		return
+	end
+
+	local camera = Workspace.CurrentCamera
+	local targetPart = GetAimbotPart(SelectedPlayer)
+	if not camera or not targetPart then
+		return
+	end
+
+	local desired = CFrame.lookAt(camera.CFrame.Position, targetPart.Position)
+	local smoothness = math.clamp(tonumber(Config.AimbotSmoothness) or 5, 0, 50)
+
+	if smoothness <= 0 then
+		camera.CFrame = desired
+	else
+		local alpha = math.clamp(1 / (smoothness + 1), 0.02, 1)
+		camera.CFrame = camera.CFrame:Lerp(desired, alpha)
+	end
+end
+
+local function ToggleAimbot()
+	if not Config.PermitAimbot then
+		SetStatus("Aimbot disabled by Config", "bad")
+		return
+	end
+
+	if not aimbotActive then
+		if not SelectedPlayer or SelectedPlayer == LocalPlayer or not GetAimbotPart(SelectedPlayer) then
+			SetStatus("Select a loaded player first", "bad")
+			return
+		end
+	end
+
+	aimbotActive = not aimbotActive
+	Config.AimbotActive = aimbotActive
+	SetActionState(
+		"Aimbot",
+		aimbotActive,
+		aimbotActive
+			and ((Config.AimbotRequireRightMouse and "Hold RMB - target @" or "Tracking @") .. SelectedPlayer.Name)
+			or "Aim camera at selected player"
+	)
+	SetStatus("Selected Aimbot " .. (aimbotActive and "ON" or "OFF"), "good")
+end
+
+local function ToggleAimbotRMBMode()
+	Config.AimbotRequireRightMouse = not Config.AimbotRequireRightMouse
+	SetActionState(
+		"AimbotRMB",
+		Config.AimbotRequireRightMouse,
+		Config.AimbotRequireRightMouse and "Aimbot only moves camera while RMB is held" or "Aimbot continuously tracks selected player"
+	)
+	SetStatus("Aimbot RMB mode " .. (Config.AimbotRequireRightMouse and "ON" or "OFF"), "good")
+end
+
+local function ToggleAimbotPart()
+	if Config.AimbotAimPart == "Head" then
+		Config.AimbotAimPart = "HumanoidRootPart"
+	else
+		Config.AimbotAimPart = "Head"
+	end
+	SetActionState("AimbotPart", Config.AimbotAimPart == "Head", "Current target part: " .. Config.AimbotAimPart)
+	SetStatus("Aimbot target = " .. Config.AimbotAimPart, "good")
+end
+
+-- Cursor lock ---------------------------------------------------------------
+
+local function GetAimPart(player)
+	if not player or player.Parent ~= Players or not player.Character then
+		return nil
+	end
+	local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return nil
+	end
+	return player.Character:FindFirstChild("Head") or player.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetCenterTarget()
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return nil
+	end
+	local center = camera.ViewportSize / 2
+	local closestPlayer = nil
+	local closestDistance = Config.AutoLockFOV
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			local part = GetAimPart(player)
+			if part then
+				local screenPoint, visible = camera:WorldToViewportPoint(part.Position)
+				if visible and screenPoint.Z > 0 then
+					local distance = (Vector2.new(screenPoint.X, screenPoint.Y) - center).Magnitude
+					if distance < closestDistance then
+						closestDistance = distance
+						closestPlayer = player
+					end
+				end
+			end
+		end
+	end
+	return closestPlayer
+end
+
+local function DisableCursorLock()
+	local oldTarget = cursorLockTarget
+	cursorLockActive = false
+	cursorLockTarget = nil
+	SetActionState("CursorLock", false, "Y locks cursor to target")
+	if oldTarget then
+		SetStatus("Unlocked @" .. oldTarget.Name, "good")
+	end
+end
+
+local function EnableCursorLock(target)
+	if not Config.PermitCursorLock then
+		SetStatus("Cursor lock disabled by Config", "bad")
+		return
+	end
+	if not target or target == LocalPlayer or not GetAimPart(target) then
+		SetStatus("Target unavailable", "bad")
+		return
+	end
+	cursorLockActive = true
+	cursorLockTarget = target
+	SetSelectedPlayer(target)
+	SetActionState("CursorLock", true, "Locked to @" .. target.Name)
+	SetStatus("Locked @" .. target.Name, "good")
+end
+
+local function ToggleCursorLock()
+	if cursorLockActive then
+		DisableCursorLock()
+		return
+	end
+	local target = GetCenterTarget() or SelectedPlayer
+	if not target or target == LocalPlayer then
+		SetStatus("No target", "bad")
+		return
+	end
+	EnableCursorLock(target)
+end
+
+local function UpdateCursorLock()
+	if not cursorLockActive then
+		return
+	end
+	local part = GetAimPart(cursorLockTarget)
+	if not part then
+		DisableCursorLock()
+		return
+	end
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local screenPoint, visible = camera:WorldToScreenPoint(part.Position)
+	if not visible or screenPoint.Z <= 0 then
+		return
+	end
+	local x = math.round(screenPoint.X)
+	local y = math.round(screenPoint.Y)
+	if typeof(mousemoveabs) == "function" then
+		local success = pcall(mousemoveabs, x, y)
+		if success then
+			return
+		end
+	end
+	if typeof(mousemoverel) == "function" then
+		local current = UserInputService:GetMouseLocation()
+		local success = pcall(mousemoverel, x - current.X, y - current.Y)
+		if success then
+			return
+		end
+	end
+	if not warnedCursorAPI then
+		warnedCursorAPI = true
+		SetStatus("Cursor API unavailable in this environment", "bad")
+	end
+end
+
+-- Wall vision ---------------------------------------------------------------
+
+local function IsPlayerPart(part)
+	if not part then
+		return false
+	end
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character and part:IsDescendantOf(player.Character) then
+			return true
+		end
+	end
+	return false
+end
+
+local function IsBaseplate(part)
+	if not part then
+		return false
+	end
+	local baseplate = Workspace:FindFirstChild("Baseplate")
+	return part == baseplate or string.lower(part.Name) == "baseplate"
+end
+
+local function IsWallLikePart(part)
+	if not part or not part:IsA("BasePart") or IsBaseplate(part) or IsPlayerPart(part) then
+		return false
+	end
+	local size = part.Size
+	local normal
+	if size.X <= size.Y and size.X <= size.Z then
+		normal = part.CFrame.RightVector
+	elseif size.Y <= size.X and size.Y <= size.Z then
+		normal = part.CFrame.UpVector
+	else
+		normal = part.CFrame.LookVector
+	end
+	if math.abs(normal.Y) > Config.WallMaxNormalY then
+		return false
+	end
+	return true
+end
+
+local function RestoreWall(part)
+	local original = activeTransparentWalls[part]
+	if original == nil then
+		return
+	end
+	if part and part.Parent then
+		pcall(function()
+			part.LocalTransparencyModifier = original
+		end)
+	end
+	activeTransparentWalls[part] = nil
+end
+
+local function RestoreAllWalls()
+	local restoreList = {}
+	for part in pairs(activeTransparentWalls) do
+		table.insert(restoreList, part)
+	end
+	for _, part in ipairs(restoreList) do
+		RestoreWall(part)
+	end
+end
+
+local function GetCameraWallHit()
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return nil
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local excluded = {}
+	if LocalPlayer.Character then
+		table.insert(excluded, LocalPlayer.Character)
+	end
+	params.FilterDescendantsInstances = excluded
+	params.IgnoreWater = true
+	local result = Workspace:Raycast(camera.CFrame.Position, camera.CFrame.LookVector * Config.WallRayDistance, params)
+	if not result then
+		return nil
+	end
+	local part = result.Instance
+	if not part or not part:IsA("BasePart") or IsBaseplate(part) or IsPlayerPart(part) then
+		return nil
+	end
+	if math.abs(result.Normal.Y) > Config.WallMaxNormalY then
+		return nil
+	end
+	return result
+end
+
+local function GetWallsAroundPoint(position)
+	local overlap = OverlapParams.new()
+	overlap.FilterType = Enum.RaycastFilterType.Exclude
+	local excluded = {}
+	if LocalPlayer.Character then
+		table.insert(excluded, LocalPlayer.Character)
+	end
+	overlap.FilterDescendantsInstances = excluded
+	local nearby = Workspace:GetPartBoundsInRadius(position, Config.WallRadius, overlap)
+	local wanted = {}
+	for _, part in ipairs(nearby) do
+		if IsWallLikePart(part) then
+			wanted[part] = true
+		end
+	end
+	return wanted
+end
+
+local function UpdateWallMode()
+	if not wallModeEnabled then
+		return
+	end
+	local hit = GetCameraWallHit()
+	if not hit then
+		RestoreAllWalls()
+		return
+	end
+	local wantedWalls = GetWallsAroundPoint(hit.Position)
+	wantedWalls[hit.Instance] = true
+	local restoreList = {}
+	for part in pairs(activeTransparentWalls) do
+		if not wantedWalls[part] then
+			table.insert(restoreList, part)
+		end
+	end
+	for _, part in ipairs(restoreList) do
+		RestoreWall(part)
+	end
+	for part in pairs(wantedWalls) do
+		if part and part.Parent then
+			if activeTransparentWalls[part] == nil then
+				activeTransparentWalls[part] = part.LocalTransparencyModifier
+			end
+			part.LocalTransparencyModifier = Config.WallTransparency
+		end
+	end
+end
+
+local function ToggleWallMode()
+	if not Config.PermitWallVision then
+		SetStatus("Wall vision disabled by Config", "bad")
+		return
+	end
+	wallModeEnabled = not wallModeEnabled
+	Config.WallVision = wallModeEnabled
+	if wallModeEnabled then
+		UpdateWallMode()
+		SetStatus("Wall Vision ON - radius " .. tostring(Config.WallRadius), "good")
+	else
+		RestoreAllWalls()
+		SetStatus("Wall Vision OFF", "good")
+	end
+	SetActionState("WallVision", wallModeEnabled, wallModeEnabled and ("Camera wall radius " .. Config.WallRadius) or "See through aimed walls locally")
+end
+
+-- Extra client-side player/camera tools -------------------------------------
+
+local function RestoreCamera()
+	local camera = Workspace.CurrentCamera
+	local humanoid = GetHumanoid(LocalPlayer)
+	if camera and humanoid then
+		camera.CameraType = Enum.CameraType.Custom
+		camera.CameraSubject = humanoid
+	end
+	spectating = false
+	Config.Spectating = false
+	SetActionState("Spectate", false, "View through selected player")
+	SetStatus("Camera restored", "good")
+end
+
+local function ToggleSpectate()
+	if spectating then
+		RestoreCamera()
+		return
+	end
+	if not SelectedPlayer or SelectedPlayer == LocalPlayer then
+		SetStatus("Select another player", "bad")
+		return
+	end
+	local humanoid = GetHumanoid(SelectedPlayer)
+	local camera = Workspace.CurrentCamera
+	if not humanoid or not camera then
+		SetStatus("Target camera subject unavailable", "bad")
+		return
+	end
+	camera.CameraType = Enum.CameraType.Custom
+	camera.CameraSubject = humanoid
+	spectating = true
+	Config.Spectating = true
+	SetActionState("Spectate", true, "Watching @" .. SelectedPlayer.Name)
+	SetStatus("Spectating @" .. SelectedPlayer.Name, "good")
+end
+
+local function ToggleFollow()
+	if followActive then
+		followActive = false
+		Config.Following = false
+		SetActionState("Follow", false, "Follow selected player")
+		SetStatus("Follow OFF", "good")
+		return
+	end
+	if not SelectedPlayer or SelectedPlayer == LocalPlayer or not GetRoot(SelectedPlayer) then
+		SetStatus("Select another loaded player", "bad")
+		return
+	end
+	if flightActive then
+		StopFlight()
+	end
+	followActive = true
+	Config.Following = true
+	SetActionState("Follow", true, "Following @" .. SelectedPlayer.Name)
+	SetStatus("Follow ON", "good")
+end
+
+local function ToggleFreeze()
+	RootPart = GetRoot(LocalPlayer)
+	if not RootPart then
+		return
+	end
+	frozen = not frozen
+	Config.Frozen = frozen
+	RootPart.Anchored = frozen
+	SetActionState("Freeze", frozen, frozen and "HumanoidRootPart anchored" or "Character movement restored")
+	SetStatus("Freeze " .. (frozen and "ON" or "OFF"), "good")
+end
+
+local function ToggleSit()
+	local humanoid = GetHumanoid(LocalPlayer)
+	if not humanoid then
+		return
+	end
+	humanoid.Sit = not humanoid.Sit
+	SetActionState("Sit", humanoid.Sit, humanoid.Sit and "Character sitting" or "Character standing")
+	SetStatus(humanoid.Sit and "Sit ON" or "Sit OFF", "good")
+end
+
+local function SetWalkSpeed(value)
+	local humanoid = GetHumanoid(LocalPlayer)
+	value = tonumber(value)
+	if not humanoid or not value then
+		SetStatus("Invalid WalkSpeed", "bad")
+		return
+	end
+	humanoid.WalkSpeed = math.clamp(value, 0, 500)
+	SetStatus("WalkSpeed = " .. tostring(humanoid.WalkSpeed), "good")
+end
+
+local function SetJumpPower(value)
+	local humanoid = GetHumanoid(LocalPlayer)
+	value = tonumber(value)
+	if not humanoid or not value then
+		SetStatus("Invalid JumpPower", "bad")
+		return
+	end
+	humanoid.UseJumpPower = true
+	humanoid.JumpPower = math.clamp(value, 0, 500)
+	SetStatus("JumpPower = " .. tostring(humanoid.JumpPower), "good")
+end
+
+local function SetGravity(value)
+	value = tonumber(value)
+	if not value then
+		SetStatus("Invalid gravity", "bad")
+		return
+	end
+	Workspace.Gravity = math.clamp(value, 0, 1000)
+	SetStatus("Gravity = " .. tostring(Workspace.Gravity), "good")
+end
+
+local function SetFlightSpeed(value)
+	value = tonumber(value)
+	if not value then
+		SetStatus("Invalid flight speed", "bad")
+		return
+	end
+	Config.CollectiveSpeed = math.clamp(value, 0, Config.MaxSpeed)
+	SetStatus("Flight speed = " .. tostring(Config.CollectiveSpeed), "good")
+end
+
+local function SetCameraFOV(value)
+	local camera = Workspace.CurrentCamera
+	value = tonumber(value)
+	if not camera or not value then
+		SetStatus("Invalid FOV", "bad")
+		return
+	end
+	camera.FieldOfView = math.clamp(value, 1, 120)
+	SetStatus("Camera FOV = " .. tostring(camera.FieldOfView), "good")
+end
+
+local function ResetCameraFOV()
+	local camera = Workspace.CurrentCamera
+	if camera then
+		camera.FieldOfView = originalCameraFOV
+		if UI and UI.FOVInput then
+			UI.FOVInput.Text = tostring(math.floor(originalCameraFOV))
+		end
+		SetStatus("Camera FOV reset", "good")
+	end
+end
+
+local function ToggleZoomUnlock()
+	zoomUnlocked = not zoomUnlocked
+	if zoomUnlocked then
+		LocalPlayer.CameraMinZoomDistance = 0.5
+		LocalPlayer.CameraMaxZoomDistance = 1000
+	else
+		LocalPlayer.CameraMinZoomDistance = originalZoom.Min
+		LocalPlayer.CameraMaxZoomDistance = originalZoom.Max
+	end
+	SetActionState("ZoomUnlock", zoomUnlocked, zoomUnlocked and "Camera zoom 0.5 - 1000" or "Default zoom limits")
+	SetStatus("Zoom unlock " .. (zoomUnlocked and "ON" or "OFF"), "good")
+end
+
+local function ToggleFullbright()
+	fullbrightEnabled = not fullbrightEnabled
+	Config.Fullbright = fullbrightEnabled
+	if fullbrightEnabled then
+		fullbrightBackup = {
+			Brightness = Lighting.Brightness,
+			ClockTime = Lighting.ClockTime,
+			FogEnd = Lighting.FogEnd,
+			GlobalShadows = Lighting.GlobalShadows,
+			Ambient = Lighting.Ambient,
+			OutdoorAmbient = Lighting.OutdoorAmbient
+		}
+		Lighting.Brightness = 2
+		Lighting.ClockTime = 14
+		Lighting.FogEnd = 1000000
+		Lighting.GlobalShadows = false
+		Lighting.Ambient = Color3.fromRGB(178, 178, 178)
+		Lighting.OutdoorAmbient = Color3.fromRGB(178, 178, 178)
+	else
+		if fullbrightBackup then
+			for property, value in pairs(fullbrightBackup) do
+				pcall(function()
+					Lighting[property] = value
+				end)
+			end
+		end
+	end
+	SetActionState("Fullbright", fullbrightEnabled, fullbrightEnabled and "Lighting boosted locally" or "Default lighting")
+	SetStatus("Fullbright " .. (fullbrightEnabled and "ON" or "OFF"), "good")
+end
+
+
+
+local function RemoveNameTag(character)
+	if UI and UI.RemoveNameTag then
+		UI:RemoveNameTag(character)
+	end
+end
+
+local function CreateNameTag(player, character)
+	if player == LocalPlayer or not nameTagsEnabled then
+		return
+	end
+	if UI and UI.CreateNameTag then
+		UI:CreateNameTag(player, character, Config.UsernameDistance)
+	end
+end
+
+
+local function RefreshNameTags()
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character then
+			RemoveNameTag(player.Character)
+			if nameTagsEnabled then
+				CreateNameTag(player, player.Character)
+			end
+		end
+	end
+end
+
+local function ToggleNameTags()
+	nameTagsEnabled = not nameTagsEnabled
+	Config.NameTagsVisible = nameTagsEnabled
+	RefreshNameTags()
+	SetActionState("NameTags", nameTagsEnabled, nameTagsEnabled and "Display + username overhead" or "Overhead tags hidden")
+	SetStatus("Name tags " .. (nameTagsEnabled and "ON" or "OFF"), "good")
+end
+
+local function RemovePlayerHighlights()
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character then
+			local old = player.Character:FindFirstChild("VoltrexESP")
+			if old then
+				old:Destroy()
+			end
+		end
+	end
+end
+
+local function ApplyPlayerHighlight(player)
+	if player == LocalPlayer or not playerHighlightsEnabled or not player.Character then
+		return
+	end
+	local old = player.Character:FindFirstChild("VoltrexESP")
+	if old then
+		old:Destroy()
+	end
+	New("Highlight", {
+		Name = "VoltrexESP",
+		Adornee = player.Character,
+		DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+		FillColor = Config.Accent,
+		FillTransparency = 0.88,
+		OutlineColor = Config.Accent,
+		OutlineTransparency = 0.05
+	}, player.Character)
+end
+
+local function RefreshPlayerHighlights()
+	RemovePlayerHighlights()
+	if playerHighlightsEnabled then
+		for _, player in ipairs(Players:GetPlayers()) do
+			ApplyPlayerHighlight(player)
+		end
+	end
+end
+
+local function TogglePlayerHighlights()
+	playerHighlightsEnabled = not playerHighlightsEnabled
+	Config.PlayerHighlightsVisible = playerHighlightsEnabled
+	RefreshPlayerHighlights()
+	SetActionState("PlayerESP", playerHighlightsEnabled, playerHighlightsEnabled and "Highlights through walls" or "Player highlights hidden")
+	SetStatus("Player highlights " .. (playerHighlightsEnabled and "ON" or "OFF"), "good")
+end
+
+local function ToggleSelectedHighlight()
+	selectedHighlightEnabled = not selectedHighlightEnabled
+	RefreshSelectedHighlight()
+	SetActionState("SelectedHighlight", selectedHighlightEnabled, selectedHighlightEnabled and "Selected target highlighted" or "Selected highlight off")
+	SetStatus("Selected highlight " .. (selectedHighlightEnabled and "ON" or "OFF"), "good")
+end
+
+local function ClearTracers()
+	for _, object in ipairs(Workspace:GetDescendants()) do
+		if object.Name == "VoltrexTracerBeam" or object.Name == "VoltrexTracerAttachment" then
+			pcall(function()
+				object:Destroy()
+			end)
+		end
+	end
+end
+
+local function RefreshTracers()
+	ClearTracers()
+	if not tracersEnabled then
+		return
+	end
+	local ourRoot = GetRoot(LocalPlayer)
+	if not ourRoot then
+		return
+	end
+	local ourAttachment = New("Attachment", {Name = "VoltrexTracerAttachment"}, ourRoot)
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			local targetRoot = GetRoot(player)
+			if targetRoot then
+				local targetAttachment = New("Attachment", {Name = "VoltrexTracerAttachment"}, targetRoot)
+				New("Beam", {
+					Name = "VoltrexTracerBeam",
+					Attachment0 = ourAttachment,
+					Attachment1 = targetAttachment,
+					Width0 = 0.035,
+					Width1 = 0.035,
+					Color = ColorSequence.new(Config.Accent),
+					FaceCamera = true,
+					LightEmission = 1,
+					Transparency = NumberSequence.new(0.15)
+				}, ourRoot)
+			end
+		end
+	end
+end
+
+local function ToggleTracers()
+	tracersEnabled = not tracersEnabled
+	Config.TracersVisible = tracersEnabled
+	RefreshTracers()
+	SetActionState("Tracers", tracersEnabled, tracersEnabled and "Beams to other players" or "Tracers hidden")
+	SetStatus("Tracers " .. (tracersEnabled and "ON" or "OFF"), "good")
+end
+
+local function ResetMovement()
+	if flightActive then
+		StopFlight()
+	end
+	if noclipEnabled then
+		ToggleNoclip()
+	end
+	if followActive then
+		ToggleFollow()
+	end
+	if frozen then
+		ToggleFreeze()
+	end
+	local humanoid = GetHumanoid(LocalPlayer)
+	if humanoid then
+		humanoid.WalkSpeed = 16
+		humanoid.UseJumpPower = true
+		humanoid.JumpPower = 50
+	end
+	Workspace.Gravity = 196.2
+	Config.CollectiveSpeed = 50
+	if UI and UI.WalkSpeedInput then UI.WalkSpeedInput.Text = "16" end
+	if UI and UI.JumpPowerInput then UI.JumpPowerInput.Text = "50" end
+	if UI and UI.GravityInput then UI.GravityInput.Text = "196.2" end
+	if UI and UI.FlightSpeedInput then UI.FlightSpeedInput.Text = "50" end
+	SetStatus("Movement reset", "good")
+end
+
+
+-- Avatar editor -------------------------------------------------------------
+
+local function ClearAvatarPreview()
+	if AvatarPreviewModel then
+		pcall(function()
+			AvatarPreviewModel:Destroy()
+		end)
+		AvatarPreviewModel = nil
+	end
+end
+
+local function GetCurrentRigType()
+	local humanoid = GetHumanoid(LocalPlayer)
+	if humanoid and humanoid.RigType == Enum.HumanoidRigType.R6 then
+		return Enum.HumanoidRigType.R6
+	end
+	return Enum.HumanoidRigType.R15
+end
+
+local function ShowAvatarDescription(description, name)
+	if not description or not UI or not UI.AvatarWorld or not UI.AvatarCamera then
+		return
+	end
+	AvatarPreviewDescription = description
+	if UI and UI.AvatarPreviewName then
+		UI.AvatarPreviewName.Text = name or "Avatar"
+	end
+	ClearAvatarPreview()
+	task.spawn(function()
+		local desiredRig = GetCurrentRigType()
+		local success, model = pcall(function()
+			return Players:CreateHumanoidModelFromDescriptionAsync(description, desiredRig)
+		end)
+		if (not success or not model) and desiredRig == Enum.HumanoidRigType.R6 then
+			success, model = pcall(function()
+				return Players:CreateHumanoidModelFromDescriptionAsync(description, Enum.HumanoidRigType.R15)
+			end)
+		end
+		if not success or not model then
+			if UI and UI.OutfitStatus then UI.OutfitStatus.Text = "3D preview unavailable" end
+			return
+		end
+		AvatarPreviewModel = model
+		model.Parent = UI.AvatarWorld
+		for _, object in ipairs(model:GetDescendants()) do
+			if object:IsA("BasePart") then
+				object.Anchored = true
+				object.CanCollide = false
+			end
+		end
+		model:PivotTo(CFrame.new())
+		local boundingCF, size = model:GetBoundingBox()
+		local center = boundingCF.Position + Vector3.new(0, size.Y * 0.05, 0)
+		local distance = math.max(size.X, size.Y, size.Z) * 1.8
+		UI.AvatarCamera.CFrame = CFrame.new(center + Vector3.new(0, 0, distance), center)
+		if UI and UI.OutfitStatus then UI.OutfitStatus.Text = "Preview ready" end
+	end)
+end
+
+local function LoadCurrentAvatar()
+	local humanoid = GetHumanoid(LocalPlayer)
+	if humanoid then
+		local ok, description = pcall(function()
+			return humanoid:GetAppliedDescription()
+		end)
+		if ok and description then
+			ShowAvatarDescription(description, "Current Avatar")
+			return
+		end
+	end
+	task.spawn(function()
+		local ok, description = pcall(function()
+			return Players:GetHumanoidDescriptionFromUserIdAsync(LocalPlayer.UserId)
+		end)
+		if ok and description then
+			ShowAvatarDescription(description, "Current Avatar")
+		elseif UI and UI.OutfitStatus then
+			UI.OutfitStatus.Text = "Current avatar unavailable"
+		end
+	end)
+end
+
+local function ClearOutfitRows()
+	if UI and UI.ClearOutfitRows then
+		UI:ClearOutfitRows()
+	end
+end
+
+local function AddOutfitRow(name, subtitle, callback)
+	if UI and UI.AddOutfitRow then
+		UI:AddOutfitRow(name, subtitle, callback)
+	end
+end
+
+local function LoadSavedOutfits(force)
+	if not Config.PermitAvatarEditor then
+		SetStatus("Avatar editor disabled by Config", "bad")
+		return
+	end
+	if outfitLoading or (outfitsLoaded and not force) then
+		return
+	end
+	outfitLoading = true
+	outfitsLoaded = false
+	ClearOutfitRows()
+	AddOutfitRow("Current Avatar", "Your currently equipped avatar", LoadCurrentAvatar)
+	if not AvatarEditorService then
+		if UI and UI.OutfitStatus then UI.OutfitStatus.Text = "Saved-avatar API unavailable" end
+		outfitLoading = false
+		return
+	end
+	if not Config.PermitAvatarRequest then
+		if UI and UI.OutfitStatus then UI.OutfitStatus.Text = "Avatar requests disabled in Config" end
+		outfitLoading = false
+		return
+	end
+	task.spawn(function()
+		local success, errorMessage = xpcall(function()
+			if UI and UI.OutfitStatus then UI.OutfitStatus.Text = "Requesting avatar access..." end
+			local promptResult = nil
+			local promptConnection = AvatarEditorService.PromptAllowInventoryReadAccessCompleted:Connect(function(result)
+				promptResult = result
+			end)
+			AvatarEditorService:PromptAllowInventoryReadAccess()
+			local started = os.clock()
+			while promptResult == nil and os.clock() - started < 15 do
+				task.wait(0.1)
+			end
+			promptConnection:Disconnect()
+			if promptResult ~= Enum.AvatarPromptResult.Success then
+				if UI and UI.OutfitStatus then UI.OutfitStatus.Text = "Saved-avatar permission unavailable" end
+				return
+			end
+			if UI and UI.OutfitStatus then UI.OutfitStatus.Text = "Loading saved avatars..." end
+			local pages = AvatarEditorService:GetOutfitsAsync(Enum.OutfitSource.All, Enum.OutfitType.All)
+			local count = 0
+			while true do
+				for _, outfit in ipairs(pages:GetCurrentPage()) do
+					count += 1
+					local outfitId = outfit.Id
+					local outfitName = outfit.Name or ("Avatar " .. tostring(outfitId))
+					AddOutfitRow(outfitName, "Outfit ID " .. tostring(outfitId), function()
+						if UI and UI.OutfitStatus then UI.OutfitStatus.Text = "Loading " .. outfitName .. "..." end
+						task.spawn(function()
+							local ok, description = pcall(function()
+								return Players:GetHumanoidDescriptionFromOutfitIdAsync(outfitId)
+							end)
+							if ok and description then
+								ShowAvatarDescription(description, outfitName)
+							elseif UI and UI.OutfitStatus then
+								UI.OutfitStatus.Text = "Could not load outfit"
+							end
+						end)
+					end)
+				end
+				if pages.IsFinished then break end
+				local advanced = pcall(function()
+					pages:AdvanceToNextPageAsync()
+				end)
+				if not advanced then break end
+			end
+			if UI and UI.OutfitStatus then
+				UI.OutfitStatus.Text = tostring(count) .. " saved avatar" .. (count == 1 and "" or "s")
+			end
+			outfitsLoaded = true
+		end, debug.traceback)
+		outfitLoading = false
+		if not success then
+			warn("[Voltrex Avatar]", errorMessage)
+			if UI and UI.OutfitStatus then UI.OutfitStatus.Text = "Saved-avatar API unavailable" end
+		end
+	end)
+end
+
+local function ApplySelectedAvatar()
+	if not Config.PermitAvatarEditor then
+		SetStatus("Avatar editor disabled by Config", "bad")
+		return
+	end
+	if not AvatarPreviewDescription then
+		SetStatus("Select an avatar first", "bad")
+		return
+	end
+	local humanoid = GetHumanoid(LocalPlayer)
+	if not humanoid then
+		SetStatus("Humanoid is not ready", "bad")
+		return
+	end
+	local success = pcall(function()
+		humanoid:ApplyDescription(AvatarPreviewDescription)
+	end)
+	if success then
+		SetStatus("Avatar applied locally", "good")
+		task.delay(0.5, ApplyCharacterTransparency)
+	else
+		SetStatus("Avatar change blocked", "bad")
+	end
+end
+
+local function SetAvatarMenu(open)
+	if not Config.PermitAvatarEditor then
+		SetStatus("Avatar editor disabled by Config", "bad")
+		return
+	end
+	avatarMenuOpen = open == true
+	if UI and UI.SetAvatarOverlay then
+		UI:SetAvatarOverlay(avatarMenuOpen)
+	end
+	if avatarMenuOpen then
+		LoadCurrentAvatar()
+		LoadSavedOutfits(false)
+		SetStatus("Avatar menu opened", "good")
+	else
+		SetStatus("Avatar menu closed", "good")
+	end
+end
+
+local function ToggleAvatarMenu()
+	SetAvatarMenu(not avatarMenuOpen)
+end
+
+
+
+
+-- Character/player setup ----------------------------------------------------
+
+local function SetupCharacter(character)
+	RestoreNoclip()
+	Character = character
+	Humanoid = character:WaitForChild("Humanoid")
+	RootPart = character:WaitForChild("HumanoidRootPart")
+	flightVelocity = Vector3.zero
+	flingActive = false
+	Config.FlingActive = false
+	RootPart.Anchored = frozen == true
+	Humanoid.PlatformStand = false
+	Humanoid.AutoRotate = true
+	RootPart.AssemblyLinearVelocity = Vector3.zero
+	RootPart.AssemblyAngularVelocity = Vector3.zero
+	task.delay(0.25, function()
+		ApplyCharacterTransparency()
+		if noclipEnabled then ApplyNoclip() end
+		if tracersEnabled then RefreshTracers() end
+	end)
+end
+
+local function SetupPlayer(player)
+	if playerConnections[player] then
+		for _, connection in ipairs(playerConnections[player]) do
+			pcall(function() connection:Disconnect() end)
+		end
+	end
+	playerConnections[player] = {}
+	if player.Character then
+		task.spawn(CaptureSpawnpoint, player, player.Character)
+		if nameTagsEnabled then task.spawn(CreateNameTag, player, player.Character) end
+		if playerHighlightsEnabled then task.spawn(ApplyPlayerHighlight, player) end
+	end
+	local connection = player.CharacterAdded:Connect(function(character)
+		CaptureSpawnpoint(player, character)
+		if nameTagsEnabled then task.delay(0.15, CreateNameTag, player, character) end
+		if playerHighlightsEnabled then task.delay(0.15, ApplyPlayerHighlight, player) end
+		if selectedHighlightEnabled and player == SelectedPlayer then task.delay(0.15, RefreshSelectedHighlight) end
+		if tracersEnabled then task.delay(0.2, RefreshTracers) end
+	end)
+	table.insert(playerConnections[player], connection)
+end
+
+local fpsAccumulator = 0
+local fpsFrames = 0
+local shownFPS = 0
+
+local function Rejoin()
+	SetStatus("Rejoining...", "warn")
+	local ok = pcall(function()
+		if game.JobId ~= "" then
+			TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+		else
+			TeleportService:Teleport(game.PlaceId, LocalPlayer)
+		end
+	end)
+	if not ok then
+		SetStatus("Rejoin unavailable", "bad")
+	end
+end
+
+local function SetAimbotSmoothness(text)
+	local value = tonumber(text)
+	if not value then
+		SetStatus("Invalid aim smoothness", "bad")
+		return
+	end
+	Config.AimbotSmoothness = math.clamp(value, 0, 50)
+	SetStatus("Aim smoothness = " .. tostring(Config.AimbotSmoothness), "good")
+end
+
+local function BuildActions()
+	return {
+		SetStatus = SetStatus,
+		SetSelectedPlayer = SetSelectedPlayer,
+		TeleportSelected = TeleportSelected,
+		TeleportToSelectedSpawn = TeleportToSelectedSpawn,
+		ToggleSpectate = ToggleSpectate,
+		ToggleFollow = ToggleFollow,
+		FlingSelected = function() task.spawn(FlingSelected) end,
+		ToggleCursorLock = ToggleCursorLock,
+		ToggleSelectedHighlight = ToggleSelectedHighlight,
+		ToggleSpawnpoints = ToggleSpawnpoints,
+		RefreshSpawnpoints = RefreshSpawnpoints,
+		ToggleAimbot = ToggleAimbot,
+		ToggleAimbotRMBMode = ToggleAimbotRMBMode,
+		ToggleAimbotPart = ToggleAimbotPart,
+		SetAimbotSmoothness = SetAimbotSmoothness,
+		ToggleFlight = ToggleFlight,
+		ToggleNoclip = ToggleNoclip,
+		ToggleFreeze = ToggleFreeze,
+		ToggleSit = ToggleSit,
+		SetFlightSpeed = SetFlightSpeed,
+		SetWalkSpeed = SetWalkSpeed,
+		SetJumpPower = SetJumpPower,
+		SetGravity = SetGravity,
+		ResetMovement = ResetMovement,
+		ToggleWallMode = ToggleWallMode,
+		ToggleFullbright = ToggleFullbright,
+		TogglePlayerHighlights = TogglePlayerHighlights,
+		ToggleNameTags = ToggleNameTags,
+		ToggleTracers = ToggleTracers,
+		ToggleInvisible = ToggleInvisible,
+		DecreaseTransparency = DecreaseTransparency,
+		IncreaseTransparency = IncreaseTransparency,
+		ToggleAvatarMenu = ToggleAvatarMenu,
+		SetAvatarMenu = SetAvatarMenu,
+		LoadCurrentAvatar = LoadCurrentAvatar,
+		LoadSavedOutfits = LoadSavedOutfits,
+		ApplySelectedAvatar = ApplySelectedAvatar,
+		SetHealth = SetHealth,
+		FullHeal = FullHeal,
+		SetCameraFOV = SetCameraFOV,
+		ResetCameraFOV = ResetCameraFOV,
+		ToggleZoomUnlock = ToggleZoomUnlock,
+		RestoreCamera = RestoreCamera,
+		Rejoin = Rejoin,
+	}
+end
+
+local function StartConnections()
+	if LocalPlayer.Character then
+		task.spawn(SetupCharacter, LocalPlayer.Character)
+	end
+	Connect(LocalPlayer.CharacterAdded, SetupCharacter)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		SetupPlayer(player)
+	end
+
+	Connect(Players.PlayerAdded, function(player)
+		SetupPlayer(player)
+		task.defer(RebuildPlayerCards)
+		if tracersEnabled then task.delay(0.25, RefreshTracers) end
+	end)
+
+	Connect(Players.PlayerRemoving, function(player)
+		SpawnCache[player] = nil
+		if UI and UI.RemoveSpawnpoint then UI:RemoveSpawnpoint(player.UserId) end
+		if cursorLockTarget == player then DisableCursorLock() end
+		if SelectedPlayer == player then
+			SelectedPlayer = nil
+			if aimbotActive then
+				aimbotActive = false
+				Config.AimbotActive = false
+				SetActionState("Aimbot", false, "Aim camera at selected player")
+			end
+			if spectating then RestoreCamera() end
+			if followActive then followActive = false; Config.Following = false end
+		end
+		if playerConnections[player] then
+			for _, connection in ipairs(playerConnections[player]) do
+				pcall(function() connection:Disconnect() end)
+			end
+			playerConnections[player] = nil
+		end
+		task.defer(RebuildPlayerCards)
+		if tracersEnabled then task.defer(RefreshTracers) end
+	end)
+
+	Connect(UserInputService.InputBegan, function(input, processed)
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			aimbotAiming = true
+		end
+		if processed or UserInputService:GetFocusedTextBox() then return end
+		if input.KeyCode == Config.TogglePanel then
+			if UI and UI.SetPanelOpen then UI:SetPanelOpen(not Config.UIopen) end
+		elseif input.KeyCode == Config.ToggleFlight then
+			ToggleFlight()
+		elseif input.KeyCode == Config.ToggleAimbot then
+			ToggleAimbot()
+		elseif input.KeyCode == Config.ToggleCursorLock then
+			ToggleCursorLock()
+		elseif input.KeyCode == Config.ToggleAvatar then
+			local shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+			if shift then ToggleWallMode() end
+		elseif input.KeyCode == Config.TransparencyUp then
+			nHeld = true
+			transparencyHoldTimer = 0
+			IncreaseTransparency()
+		elseif input.KeyCode == Config.TransparencyDown then
+			mHeld = true
+			transparencyHoldTimer = 0
+			DecreaseTransparency()
+		elseif input.KeyCode == Config.ViewSpawnpoints then
+			ToggleSpawnpoints()
+		end
+	end)
+
+	Connect(UserInputService.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			aimbotAiming = false
+		end
+		if input.KeyCode == Config.TransparencyUp then
+			nHeld = false
+			transparencyHoldTimer = 0
+		elseif input.KeyCode == Config.TransparencyDown then
+			mHeld = false
+			transparencyHoldTimer = 0
+		end
+	end)
+
+	Connect(RunService.RenderStepped, function(deltaTime)
+		fpsAccumulator += deltaTime
+		fpsFrames += 1
+		if fpsAccumulator >= 0.5 then
+			shownFPS = math.floor(fpsFrames / fpsAccumulator + 0.5)
+			fpsAccumulator = 0
+			fpsFrames = 0
+		end
+
+		if nHeld or mHeld then
+			transparencyHoldTimer += deltaTime
+			while transparencyHoldTimer >= 0.045 do
+				transparencyHoldTimer -= 0.045
+				if nHeld and not mHeld then IncreaseTransparency() elseif mHeld and not nHeld then DecreaseTransparency() end
+			end
+		else
+			transparencyHoldTimer = 0
+		end
+
+		if wallModeEnabled then
+			wallUpdateAccumulator += deltaTime
+			if wallUpdateAccumulator >= Config.WallUpdateInterval then
+				wallUpdateAccumulator = 0
+				UpdateWallMode()
+			end
+		else
+			wallUpdateAccumulator = 0
+		end
+
+		transparencyRefreshTimer += deltaTime
+		if transparencyRefreshTimer >= 0.15 then
+			transparencyRefreshTimer = 0
+			if selfTransparency > 0 then ApplyCharacterTransparency() end
+		end
+
+		if AvatarPreviewModel and AvatarPreviewModel.Parent and UI and UI.AvatarOverlay and UI.AvatarOverlay.Visible then
+			pcall(function()
+				AvatarPreviewModel:PivotTo(AvatarPreviewModel:GetPivot() * CFrame.Angles(0, math.rad(10) * deltaTime, 0))
+			end)
+		end
+
+		if aimbotActive then UpdateAimbot() end
+		if cursorLockActive then UpdateCursorLock() end
+		if noclipEnabled and not flingActive then ApplyNoclip() end
+
+		if followActive then
+			local ourRoot = GetRoot(LocalPlayer)
+			local targetRoot = SelectedPlayer and GetRoot(SelectedPlayer)
+			if ourRoot and targetRoot then
+				ourRoot.CFrame = targetRoot.CFrame * CFrame.new(Config.FollowOffset)
+				ourRoot.AssemblyLinearVelocity = Vector3.zero
+			else
+				followActive = false
+				Config.Following = false
+				SetActionState("Follow", false, "Follow selected player")
+			end
+		end
+
+		if UI and UI.UpdateSelectedUserText and SelectedPlayer and SelectedPlayer.Parent == Players then
+			local ourRoot = GetRoot(LocalPlayer)
+			local targetRoot = GetRoot(SelectedPlayer)
+			if ourRoot and targetRoot then
+				local distance = math.floor((ourRoot.Position - targetRoot.Position).Magnitude + 0.5)
+				UI:UpdateSelectedUserText("@" .. SelectedPlayer.Name .. "  -  " .. distance .. " studs  -  " .. shownFPS .. " FPS")
+			end
+		end
+
+		if not flightActive or flingActive then return end
+		Character = LocalPlayer.Character
+		Humanoid = GetHumanoid(LocalPlayer)
+		RootPart = GetRoot(LocalPlayer)
+		if not Character or not Character.Parent or not Humanoid or not RootPart or Humanoid.Health <= 0 then
+			StopFlight()
+			return
+		end
+		local camera = Workspace.CurrentCamera
+		if not camera then return end
+		Humanoid.AutoRotate = false
+		pcall(function() Humanoid:ChangeState(Enum.HumanoidStateType.Physics) end)
+		local forward = camera.CFrame.LookVector
+		local right = camera.CFrame.RightVector
+		local direction = Vector3.zero
+		if UserInputService:IsKeyDown(Config.MoveForward) then direction += forward end
+		if UserInputService:IsKeyDown(Config.MoveBackwards) then direction -= forward end
+		if UserInputService:IsKeyDown(Config.MoveRight) then direction += right end
+		if UserInputService:IsKeyDown(Config.MoveLeft) then direction -= right end
+		local speed = Config.CollectiveSpeed
+		if UserInputService:IsKeyDown(Config.FlightSprint) then speed *= Config.FlightBoostMultiplier end
+		speed = math.clamp(speed, 0, Config.MaxSpeed)
+		if direction.Magnitude > 0.001 then
+			flightVelocity = direction.Unit * speed
+		else
+			flightVelocity = flightVelocity:Lerp(Vector3.zero, math.clamp(Config.FlightDeceleration * deltaTime, 0, 1))
+		end
+		local newPosition = RootPart.Position + flightVelocity * deltaTime
+		local flatLook = Vector3.new(forward.X, 0, forward.Z)
+		local rotation = RootPart.CFrame.Rotation
+		if flatLook.Magnitude > 0.001 then rotation = CFrame.lookAt(Vector3.zero, flatLook.Unit) end
+		RootPart.CFrame = CFrame.new(newPosition) * rotation
+		RootPart.AssemblyLinearVelocity = Vector3.zero
+		RootPart.AssemblyAngularVelocity = Vector3.zero
+	end)
+end
+
+function module.Stop()
+	if not started then return end
+	started = false
+	aimbotActive = false
+	aimbotAiming = false
+	Config.AimbotActive = false
+	pcall(RestoreAllWalls)
+	pcall(RestoreNoclip)
+	pcall(RestoreFlingCollision)
+	pcall(ClearSelectedHighlight)
+	pcall(RemovePlayerHighlights)
+	pcall(ClearTracers)
+	pcall(RestoreCamera)
+	if fullbrightEnabled and fullbrightBackup then
+		for property, value in pairs(fullbrightBackup) do
+			pcall(function() Lighting[property] = value end)
+		end
+	end
+	for _, connection in ipairs(Connections) do
+		pcall(function() connection:Disconnect() end)
+	end
+	table.clear(Connections)
+	for _, list in pairs(playerConnections) do
+		for _, connection in ipairs(list) do
+			pcall(function() connection:Disconnect() end)
+		end
+	end
+	table.clear(playerConnections)
+	if UI and UI.Destroy then
+		pcall(function() UI:Destroy() end)
+	end
+	UI = nil
+	if ENV.Voltrex == module then ENV.Voltrex = nil end
+end
+
+function module.Start()
+	if started then return module end
+	if Config.Username ~= "" and string.lower(LocalPlayer.Name) ~= string.lower(Config.Username) then
+		return module
+	end
+	if typeof(ENV.VoltrexCleanup) == "function" then
+		pcall(ENV.VoltrexCleanup)
+	end
+	started = true
+
+	local gamename = "Game"
+	local success, gameinfo = pcall(function()
+		return MarketplaceService:GetProductInfo(game.PlaceId)
+	end)
+	if success and gameinfo and gameinfo.Name then
+		gamename = gameinfo.Name
+	end
+
+	task.spawn(function()
+		Communications.Log(0, "MAIN", "Starting Voltrex")
+	end)
+
+	local startupOK, startupError = xpcall(function()
+		Interface.Startup(
+			Theme,
+			"Voltrex",
+			"Ultimate hacks",
+			gamename,
+			"V0.04",
+			"cwcodemaker",
+			3
+		)
+	end, debug.traceback)
+
+	if not startupOK then
+		started = false
+		task.spawn(function()
+			Communications.Log(2, "STARTUP", tostring(startupError))
+		end)
+		return nil, startupError
+	end
+
+	local buildOK, buildResult = xpcall(function()
+		return Interface.Build(Theme, Config, BuildActions())
+	end, debug.traceback)
+
+	if not buildOK then
+		started = false
+		task.spawn(function()
+			Communications.Log(2, "INTERFACE", tostring(buildResult))
+		end)
+		return nil, buildResult
+	end
+
+	UI = buildResult
+	RebuildPlayerCards()
+	StartConnections()
+	RefreshSpawnpoints()
+	RefreshSelectedUI()
+	UpdateTransparencyUI()
+	SetStatus("Ready - T Flight - Y Aimbot - L CursorLock - Shift+U Walls - G Spawns")
+
+	ENV.Voltrex = module
+	ENV.VoltrexCleanup = module.Stop
+	return module
+end
+
+function module.GetConfig()
+	return Config
+end
+
+function module.GetTheme()
+	return Theme
+end
+
+function module.GetSelectedPlayer()
+	return SelectedPlayer
+end
+
+module.Config = Config
+module.Theme = Theme
+module.SetSelectedPlayer = SetSelectedPlayer
+module.ToggleFlight = ToggleFlight
+module.fly = ToggleFlight
+module.ToggleNoclip = ToggleNoclip
+module.ToggleAimbot = ToggleAimbot
+module.ToggleCursorLock = ToggleCursorLock
+module.ToggleWallVision = ToggleWallMode
+module.ToggleSpawnpoints = ToggleSpawnpoints
+module.ToggleSpectate = ToggleSpectate
+module.ToggleFollow = ToggleFollow
+module.ToggleFullbright = ToggleFullbright
+module.ToggleNameTags = ToggleNameTags
+module.TogglePlayerHighlights = TogglePlayerHighlights
+module.ToggleTracers = ToggleTracers
+module.ToggleInvisible = ToggleInvisible
+module.SetTransparency = SetCharacterTransparency
+module.Teleport = TeleportSelected
+module.TeleportSpawn = TeleportToSelectedSpawn
+module.Fling = function() task.spawn(FlingSelected) end
+module.SetHealth = SetHealth
+module.FullHeal = FullHeal
+module.SetFlightSpeed = SetFlightSpeed
+module.OpenAvatar = function() SetAvatarMenu(true) end
+module.CloseAvatar = function() SetAvatarMenu(false) end
+module.MessageBox = function(title, message, buttons)
+	return Interface.MessageBox(Theme, title, message, buttons)
+end
+module.SetPanelOpen = function(value)
+	if UI and UI.SetPanelOpen then UI:SetPanelOpen(value) end
+end
+
+return module
