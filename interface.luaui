@@ -990,21 +990,69 @@ function Interface.Build(theme, runtimeConfig, actions)
 
 	-- Player page ------------------------------------------------------
 	CreateSection(playerPage, "Players")
-	local playerHeader = BaseRow(playerPage, 54)
-	UI.SelectedName = Label(playerHeader, "No player selected", UDim2.new(0.5, -4, 0, 22), UDim2.fromOffset(0, 4), Text, Enum.Font.GothamBold, 14, 106)
-	UI.SelectedUser = Label(playerHeader, "Select a player below", UDim2.new(0.5, -4, 0, 18), UDim2.fromOffset(0, 29), Muted, Enum.Font.Gotham, 11, 106)
+	local playerHeader = BaseRow(playerPage, 58)
+	UI.SelectedName = Label(playerHeader, "No player selected", UDim2.new(0.43, -4, 0, 22), UDim2.fromOffset(0, 5), Text, Enum.Font.GothamBold, 14, 106)
+	UI.SelectedUser = Label(playerHeader, "Select a player", UDim2.new(0.43, -4, 0, 18), UDim2.fromOffset(0, 31), Muted, Enum.Font.Gotham, 11, 106)
+
+	local playerListHolder = New("Frame", {
+		Name = "PlayerListHolder",
+		Size = UDim2.new(0.57, -4, 0, 42),
+		Position = UDim2.new(0.43, 4, 0, 8),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ZIndex = 106,
+	}, playerHeader)
+
+	local playerLeft = New("TextButton", {
+		Name = "PlayerLeft",
+		Size = UDim2.fromOffset(28, 34),
+		Position = UDim2.fromOffset(0, 4),
+		BackgroundColor3 = Panel,
+		BorderSizePixel = 0,
+		Text = "‹",
+		TextColor3 = Text,
+		Font = Enum.Font.GothamBold,
+		TextSize = 20,
+		AutoButtonColor = false,
+		ZIndex = 108,
+	}, playerListHolder)
+	Round(playerLeft, 5)
+	Stroke(playerLeft, Track, 0.35, 1)
+
+	local playerRight = New("TextButton", {
+		Name = "PlayerRight",
+		AnchorPoint = Vector2.new(1, 0),
+		Size = UDim2.fromOffset(28, 34),
+		Position = UDim2.new(1, 0, 0, 4),
+		BackgroundColor3 = Panel,
+		BorderSizePixel = 0,
+		Text = "›",
+		TextColor3 = Text,
+		Font = Enum.Font.GothamBold,
+		TextSize = 20,
+		AutoButtonColor = false,
+		ZIndex = 108,
+	}, playerListHolder)
+	Round(playerRight, 5)
+	Stroke(playerRight, Track, 0.35, 1)
+
 	local playerList = New("ScrollingFrame", {
 		Name = "PlayerList",
-		Size = UDim2.new(0.5, -4, 0, 40),
-		Position = UDim2.new(0.5, 4, 0, 7),
+		Size = UDim2.new(1, -68, 0, 40),
+		Position = UDim2.fromOffset(34, 1),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		CanvasSize = UDim2.new(),
 		AutomaticCanvasSize = Enum.AutomaticSize.X,
+		CanvasPosition = Vector2.new(0, 0),
 		ScrollingDirection = Enum.ScrollingDirection.X,
-		ScrollBarThickness = 0,
+		ScrollingEnabled = true,
+		ElasticBehavior = Enum.ElasticBehavior.Never,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Accent,
+		Active = true,
 		ZIndex = 106,
-	}, playerHeader)
+	}, playerListHolder)
 	New("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
 		VerticalAlignment = Enum.VerticalAlignment.Center,
@@ -1012,6 +1060,57 @@ function Interface.Build(theme, runtimeConfig, actions)
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, playerList)
 	UI.PlayerList = playerList
+
+	local function playerScrollLimit()
+		return math.max(0, playerList.AbsoluteCanvasSize.X - playerList.AbsoluteSize.X)
+	end
+
+	local function scrollPlayerList(amount)
+		local targetX = math.clamp(playerList.CanvasPosition.X + amount, 0, playerScrollLimit())
+		TweenService:Create(playerList, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			CanvasPosition = Vector2.new(targetX, 0),
+		}):Play()
+	end
+
+	Connect(playerLeft.MouseButton1Click, function()
+		scrollPlayerList(-142)
+	end)
+	Connect(playerRight.MouseButton1Click, function()
+		scrollPlayerList(142)
+	end)
+
+	Connect(playerLeft.MouseEnter, function()
+		TweenService:Create(playerLeft, TweenInfo.new(0.1), {BackgroundColor3 = RowPressed}):Play()
+	end)
+	Connect(playerLeft.MouseLeave, function()
+		TweenService:Create(playerLeft, TweenInfo.new(0.1), {BackgroundColor3 = Panel}):Play()
+	end)
+	Connect(playerRight.MouseEnter, function()
+		TweenService:Create(playerRight, TweenInfo.new(0.1), {BackgroundColor3 = RowPressed}):Play()
+	end)
+	Connect(playerRight.MouseLeave, function()
+		TweenService:Create(playerRight, TweenInfo.new(0.1), {BackgroundColor3 = Panel}):Play()
+	end)
+
+	-- Roblox normally gives the mouse wheel to the outer vertical page.
+	-- When the cursor is over the player strip, turn the wheel into horizontal scrolling.
+	Connect(UserInputService.InputChanged, function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
+		if not playerList.Visible then return end
+
+		local mouse = UserInputService:GetMouseLocation()
+		local pos = playerList.AbsolutePosition
+		local size = playerList.AbsoluteSize
+		if mouse.X < pos.X or mouse.X > pos.X + size.X or mouse.Y < pos.Y or mouse.Y > pos.Y + size.Y then
+			return
+		end
+
+		local wheel = input.Position.Z
+		if wheel ~= 0 then
+			scrollPlayerList(-wheel * 90)
+		end
+	end)
+
 	AddDivider(playerPage)
 
 	CreateSection(playerPage, "Target")
@@ -1122,6 +1221,30 @@ function Interface.Build(theme, runtimeConfig, actions)
 				card.BackgroundColor3 = isSelected and Accent or Panel
 				card.TextColor3 = isSelected and Background or Text
 			end
+		end
+
+		-- Keep the selected player visible even when the list is long.
+		local selectedCard = player and self.PlayerCards[player]
+		if selectedCard and selectedCard.Parent and self.PlayerList then
+			task.defer(function()
+				if not selectedCard.Parent or not self.PlayerList or not self.PlayerList.Parent then return end
+				local listX = self.PlayerList.AbsolutePosition.X
+				local listWidth = self.PlayerList.AbsoluteSize.X
+				local cardX = selectedCard.AbsolutePosition.X
+				local cardWidth = selectedCard.AbsoluteSize.X
+				local currentX = self.PlayerList.CanvasPosition.X
+				local targetX = currentX
+
+				if cardX < listX then
+					targetX = currentX - (listX - cardX) - 6
+				elseif cardX + cardWidth > listX + listWidth then
+					targetX = currentX + ((cardX + cardWidth) - (listX + listWidth)) + 6
+				end
+
+				local maxX = math.max(0, self.PlayerList.AbsoluteCanvasSize.X - self.PlayerList.AbsoluteSize.X)
+				targetX = math.clamp(targetX, 0, maxX)
+				self.PlayerList.CanvasPosition = Vector2.new(targetX, 0)
+			end)
 		end
 	end
 
