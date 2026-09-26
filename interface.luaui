@@ -575,6 +575,9 @@ function Interface.Build(theme, runtimeConfig, actions)
 
 	local WINDOW_WIDTH = 700
 	local WINDOW_HEIGHT = 480
+	local MIN_WINDOW_WIDTH = 560
+	local MIN_WINDOW_HEIGHT = 380
+	local currentWindowSize = Vector2.new(WINDOW_WIDTH, WINDOW_HEIGHT)
 
 	local main = New("CanvasGroup", {
 		Name = "Main",
@@ -591,10 +594,10 @@ function Interface.Build(theme, runtimeConfig, actions)
 	UI.Main = main
 	Round(main, 8)
 	Stroke(main, Track, 0.2, 1)
-	AddResponsiveScale(main, WINDOW_WIDTH, WINDOW_HEIGHT, 26)
+	local responsiveScale = AddResponsiveScale(main, WINDOW_WIDTH, WINDOW_HEIGHT, 26)
 
 	local leftAccent = New("Frame", {
-		Size = UDim2.fromOffset(4, WINDOW_HEIGHT),
+		Size = UDim2.new(0, 4, 1, 0),
 		BackgroundColor3 = Panel,
 		BorderSizePixel = 0,
 		ZIndex = 101,
@@ -725,6 +728,102 @@ function Interface.Build(theme, runtimeConfig, actions)
 			)
 		end
 	end)
+
+	-- Bottom-right resize grip. Drag it to resize the interface.
+	local resizeHandle = New("TextButton", {
+		Name = "ResizeHandle",
+		AnchorPoint = Vector2.new(1, 1),
+		Size = UDim2.fromOffset(30, 30),
+		Position = UDim2.new(1, -3, 1, -3),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Text = "↘",
+		TextColor3 = Muted,
+		Font = Enum.Font.GothamBold,
+		TextSize = 17,
+		AutoButtonColor = false,
+		ZIndex = 180,
+	}, main)
+
+	Connect(resizeHandle.MouseEnter, function()
+		TweenService:Create(resizeHandle, TweenInfo.new(0.1), {TextColor3 = Text}):Play()
+	end)
+	Connect(resizeHandle.MouseLeave, function()
+		TweenService:Create(resizeHandle, TweenInfo.new(0.1), {TextColor3 = Muted}):Play()
+	end)
+
+	local resizing = false
+	local resizeStart = nil
+	local resizeStartSize = nil
+	local resizeStartPosition = nil
+
+	local function getResizeLimits()
+		local camera = Workspace.CurrentCamera
+		if not camera then
+			return 1200, 850
+		end
+		local scaleValue = math.max((responsiveScale and responsiveScale.Scale) or 1, 0.1)
+		local viewport = camera.ViewportSize
+		local maxWidth = math.max(MIN_WINDOW_WIDTH, math.floor((viewport.X - 30) / scaleValue))
+		local maxHeight = math.max(MIN_WINDOW_HEIGHT, math.floor((viewport.Y - 30) / scaleValue))
+		return maxWidth, maxHeight
+	end
+
+	local function setWindowSize(width, height, keepTopLeft, startSize, startPos)
+		local maxWidth, maxHeight = getResizeLimits()
+		width = math.clamp(math.floor((tonumber(width) or WINDOW_WIDTH) + 0.5), MIN_WINDOW_WIDTH, maxWidth)
+		height = math.clamp(math.floor((tonumber(height) or WINDOW_HEIGHT) + 0.5), MIN_WINDOW_HEIGHT, maxHeight)
+
+		currentWindowSize = Vector2.new(width, height)
+		main.Size = UDim2.fromOffset(width, height)
+
+		if keepTopLeft and startSize and startPos then
+			local widthDelta = width - startSize.X
+			local heightDelta = height - startSize.Y
+			main.Position = UDim2.new(
+				startPos.X.Scale,
+				startPos.X.Offset + widthDelta / 2,
+				startPos.Y.Scale,
+				startPos.Y.Offset + heightDelta / 2
+			)
+		end
+	end
+
+	Connect(resizeHandle.InputBegan, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			resizing = true
+			resizeStart = input.Position
+			resizeStartSize = currentWindowSize
+			resizeStartPosition = main.Position
+		end
+	end)
+
+	Connect(UserInputService.InputChanged, function(input)
+		if not resizing or input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+		local scaleValue = math.max((responsiveScale and responsiveScale.Scale) or 1, 0.1)
+		local delta = (input.Position - resizeStart) / scaleValue
+		setWindowSize(
+			resizeStartSize.X + delta.X,
+			resizeStartSize.Y + delta.Y,
+			true,
+			resizeStartSize,
+			resizeStartPosition
+		)
+	end)
+
+	Connect(UserInputService.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			resizing = false
+		end
+	end)
+
+	function UI:SetSize(width, height)
+		setWindowSize(width, height, false)
+	end
+
+	function UI:GetSize()
+		return currentWindowSize.X, currentWindowSize.Y
+	end
 
 	local function CreatePage(name)
 		local page = New("ScrollingFrame", {
@@ -1375,20 +1474,22 @@ function Interface.Build(theme, runtimeConfig, actions)
 		open = open == true
 		runtimeConfig.UIopen = open
 		if panelTween then pcall(function() panelTween:Cancel() end) end
+		local targetWidth = currentWindowSize.X
+		local targetHeight = currentWindowSize.Y
 		if open then
 			main.Visible = true
 			main.GroupTransparency = 1
-			main.Size = UDim2.fromOffset(WINDOW_WIDTH - 12, WINDOW_HEIGHT - 8)
+			main.Size = UDim2.fromOffset(math.max(MIN_WINDOW_WIDTH, targetWidth - 12), math.max(MIN_WINDOW_HEIGHT, targetHeight - 8))
 			panelTween = TweenService:Create(main, TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
 				GroupTransparency = 0,
-				Size = UDim2.fromOffset(WINDOW_WIDTH, WINDOW_HEIGHT),
+				Size = UDim2.fromOffset(targetWidth, targetHeight),
 			})
 			panelTween:Play()
 			TweenService:Create(launcher, TweenInfo.new(0.12), {BackgroundColor3 = Accent, TextColor3 = Background}):Play()
 		else
 			panelTween = TweenService:Create(main, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				GroupTransparency = 1,
-				Size = UDim2.fromOffset(WINDOW_WIDTH - 12, WINDOW_HEIGHT - 8),
+				Size = UDim2.fromOffset(math.max(MIN_WINDOW_WIDTH, targetWidth - 12), math.max(MIN_WINDOW_HEIGHT, targetHeight - 8)),
 			})
 			local closing = panelTween
 			panelTween:Play()
