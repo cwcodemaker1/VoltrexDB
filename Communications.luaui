@@ -1,7 +1,3 @@
---!nonstrict
-
--- Voltrex Communications
--- Local HTTP/logging only. No UI code belongs in this module.
 
 local comms = {}
 
